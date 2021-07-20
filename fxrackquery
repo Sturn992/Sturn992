@@ -1,0 +1,90 @@
+while read LINE
+do
+    ./fx_ipmi.sh $LINE
+done < fx_all.txt
+OPS-SAC 17:29:28 root@pm101:Sam # more fxrack_query.sh
+#!/bin/bash
+#
+# This script will get a 'racdump' of all valid IPMI_IP addresses in a specified rack.
+# It is intended to validate inventory based on physical presence and what is found in foreman.
+# Refer to this page for details:
+# https://confluence.sac.int.threatmetrix.com/display/OPS/Vendor+Rack+%3C--%3E+DRAC+3rd+octet+designations
+#
+
+rack=$1
+[ -z "$rack" ] && { echo "rack not defined in $1, using default" ;  rack=12 ; }
+outputfile=/Sam/tmp/$rack.csv
+[ -f $outputfile ] && rm -f $outputfile
+case $rack in
+#Sac
+	"B07"|"b07" )
+    rack_prefix=10.199.11
+   ;;
+	"B08"|"b08")
+    rack_prefix=10.199.12
+  ;;
+	"B09"|"b09" )
+     rack_prefix=10.199.13
+  ;;
+	"B010"|"b010")
+     rack_prefix=10.199.14
+  ;;
+#AM1
+	"202EQ28"|"202eq28" )
+     rack_prefix=10.198.2
+  ;;
+	"203EQ28"|"203eq28" )
+     rack_prefix=10.198.3
+  ;;
+	"204EQ28"|"204eq28" )
+	 rack_prefix=10.198.4
+  ;;
+	"205EQ28"|"205eq28" )
+	 rack_prefix=10.198.5
+  ;;
+#ICE
+    "B8"|"b8" )
+	rack_prefix=10.197.19
+  ;;
+    "B9"|"b9" )
+    rack_prefix=10.197.20
+  ;;
+	"B10"|"b10" )
+    rack_prefix=10.197.22
+  ;;
+  *)  echo "Usage: $0 <rack name>.  Example rack name: D02, or B07"
+    exit 1
+  ;;
+  esac
+echo ""
+echo "Rack: $rack"
+echo ""
+echo "IPMI_IP Host_Name Tag Model IPMI_MAC MAC" |awk '{printf "%-14s%-55s%-10s%-25s%-20s%-20s\n",$1,$2,$3,$4,$5,$6}'
+for ip in $rack_prefix.{120..54}
+  do
+    ping $ip -c 1 2>&1 >/dev/null
+    if [ $? -eq 0 ]
+      then
+        tmpfile=/Sam/tmp/$ip.txt
+        [[ -f "$tmpfile" ]] && { rm $tmpfile ; } # pre-cleanup
+        racadm -u root -p S8HJ5PkGn9 -r $ip racdump >>$tmpfile 2>/dev/null
+        query_status=$?
+        name=$(egrep "^Host Name" $tmpfile |awk '{print $4}')
+	[ -z "$name" ] && name=UNKNOWN
+        tag=$(egrep "^Service Tag" $tmpfile |awk '{print $4}')
+        model=$(egrep "^System Model" $tmpfile |awk '{print $4,$5}' | tr ' ' '_')
+        IPMI_MAC=$(egrep ^MAC $tmpfile |awk '{print $4}')
+        MAC=$(egrep 'NIC.Inetegrated.1-1|NIC.Embedded.1-1|NIC.Integrated.1-1' $tmpfile |awk '{print $4}')
+        #Output line
+        if [[ $query_status -ne 0 ]] ; then
+            echo "$ip: Rack query failed"
+        else
+            echo "$ip $name $tag $model ${IPMI_MAC:-NULL} ${MAC:-UNKNOWN}" |awk '{printf "%-14s%-55s%-10s%-25s%-20s%-20s\n",$1,$2,$3,$4,$5,$6}'
+	    echo "$ip,$name,$tag,$model,$IPMI_MAC,$MAC" >>$outputfile
+        fi
+        [ -f "$tmpfile" ] && rm $tmpfile # post-cleanup
+      fi
+  done
+echo
+echo "this data was saved in a spreadsheet-ready format here: $outputfile"
+echo
