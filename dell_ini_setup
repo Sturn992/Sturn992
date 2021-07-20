@@ -1,0 +1,63 @@
+#!/bin/bash
+#
+# This script is intented to make all necessary iDRAC/Bios modifications necessary for our PXE process.
+
+BASEDIR=$(dirname $0)
+new_passwd=xxxxx
+
+# If there is no arguement, then print usage statement and exit
+
+[[ -z "$1" ]] && { echo "Usage: $0 <IPMI_IP> <IPMI_IP> etc.  OR Usage: $0 </path/to/ipmi.list>" ; exit 1 ; }
+
+# If $1 is a regular file, assume it contains a valid list of IP's to execute password set against.
+# Also works with up to 9 arguements as an array of nodes to PXE-boot.
+
+[[ -f "$1" ]] && list=$(cat $1) || list=$*
+
+function reset_config() {
+	racadm -u root -p $new_passwd -r $ip racresetcfg
+}
+
+function clear_foreign() {
+        racadm -u root -p $new_passwd -r $ip storage clearconfig:
+}
+
+function set_boot_mode() {
+	boot_mode=$(racadm -u root -p superuser -r $ip get BIOS.BiosBootSettings.BootMode|egrep ^BootMode|cut -d= -f2|sed 's/ //g')
+	if [[ $boot_mode != "Bios" ]]  ; then
+		racadm -u root -p $new_passwd -r $ip set BIOS.BiosBootSettings.BootMode Bios
+		racadm -u root -p $new_passwd -r $ip jobqueue create BIOS.Setup.1-1
+		racadm -u root -p $new_passwd -r $ip serveraction powercycle
+	fi
+}
+
+function set_boot_sequence() {
+	racadm -u root -p $new_passwd -r $ip set BIOS.BiosBootSettings.BootSeq "HardDisk.List.1-1,NIC.Integrated.1-1-1"
+	racadm -u root -p $new_passwd -r $ip jobqueue create BIOS.Setup.1-1 -r pwrcycle -s next reboot
+	racadm -u root -p $new_passwd -r $ip serveraction powercycle
+}
+
+for ip in $list ; do
+	# Safety check
+	hostname=$(racadm -u root -p superuser -r $ip get System.ServerOS.HostName |egrep ^HostName |cut -d= -f2)
+	echo $hostname |egrep -q threatmetrix
+	# This test will check if the host has a defined hostname in iDRAC.  The presence of which indicates it has previously been provisioned.
+	#if [[ $? -ne 0 ]] ; then
+		# set password
+	#	$BASEDIR/set_drac_passwd.sh $ip
+
+		# check for / create Vdisk
+		$BASEDIR/create_root_partition.sh $ip
+
+		# set BIOS boot method (UEFI/BIOS)
+		# This step may not be required.
+		# Set PXE and reboot
+                set_boot_mode
+                set_boot_sequence
+		$BASEDIR/pxe_boot.sh $ip
+	#else
+	#	echo "$ip has already been provisioned as $hostname"
+	#	echo "Skipping $ip"
+	#	echo "If you want to re-provision, then use the command : $BASEDIR/pxe_boot.sh $ip"
+	#fi
+done
