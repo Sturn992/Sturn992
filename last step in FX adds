@@ -1,0 +1,4 @@
+while read LINE
+do
+    ./fx_ipmi.sh $LINE
+done < fx_all.txt
