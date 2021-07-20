@@ -1,0 +1,26 @@
+#!/bin/sh
+IDRACUSER="root"
+IDRACPASS="password"
+
+if ! [ $# -eq 1 ]; then
+    echo "Usage: $0 <CMC_IP_Address>"
+    exit 1;
+fi
+
+cmc=$1
+x=$cmc
+oc1=${x%%.*}
+x=${x#*.*}
+oc2=${x%%.*}
+x=${x#*.*}
+oc3=${x%%.*}
+x=${x#*.*}
+oc4=${x%%.*}
+
+for i in {1..4}; do
+    number=$(( $oc4 * 2 + 60 + $i ))
+    ipmi="$oc1.$oc2.$oc3.$number"
+    gateway="$oc1.$oc2.0.1"
+    echo "Setting slot $i on CMC $cmc as $ipmi...."
+    racadm -r $cmc -u $IDRACUSER -p $IDRACPASS setniccfg -s $ipmi 255.255.0.0 $gateway -m server-$i
+done
