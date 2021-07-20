@@ -1,0 +1,64 @@
+#!/bin/bash -x
+
+# If there is no arguement, then print usage statement and exit
+new_passwd=xxxxxxx
+
+[ -z "$1" ] && { echo "Usage: $0 <IPMI_IP> <IPMI_IP> etc.  OR Usage: $0 </path/to/ipmilist.txt>" ; exit 1 ; }
+
+# If $1 is a regular file, assume it contains a valid list of IP's to execute password set against.
+# Also works with up to 9 arguements as an array of nodes to PXE-boot.
+
+[ -f "$1" ] && list=$(cat $1) || list=$*
+
+for ip in $list ; do
+	hardware_model=$(racadm -u root -p $new_passwd -r $ip getsysinfo |grep "System Model" |awk '{print $5}')
+	case "$hardware_model" in
+
+	R730xd|R720xd|R640|R6145|R740|R740xd2|R7515)
+		racadm -u root -p $new_passwd -r $ip get Storage.VirtualDisk.1 2>&1 >/dev/null
+		if [ $? -ne 0 ] ; then
+			echo "VirtualDisk.1 does not exist on $ip ; creating..."
+			disk1=$(racadm -u root -p $new_passwd -r $ip get Storage.PhysicalDisk |egrep -o '=.*#' | head -1 | sed 's/=//g' | sed 's/#//g')
+			disk2=$(racadm -u root -p $new_passwd -r $ip get Storage.PhysicalDisk |egrep -o '=.*#' | head -2 | tail -1 | sed 's/=//g' | sed 's/#//g')
+			[ -z "$disk2" ] && { echo "unable to identify disk(s) for $ip" ; echo "correct problem and retry" ; exit 1 ; }
+			racadm -u root -p $new_passwd -r $ip storage createvd:RAID.Integrated.1-1 -rl r1 -wp wb -rp ra -name "root" -pdkey:$disk1,$disk2
+			racadm -u root -p $new_passwd -r $ip jobqueue create RAID.Integrated.1-1
+			racadm -u root -p $new_passwd -r $ip serveraction powercycle
+		else
+			echo "VirtualDisk.1 already exists on $ip ; skipping"
+		fi
+		;;
+	R730|R720)
+		racadm -u root -p $new_passwd -r $ip get Storage.VirtualDisk.1 2>&1 >/dev/null
+		if [ $? -ne 0 ] ; then
+			echo "VirtualDisk.1 does not exist on $ip ; creating..."
+			disk1=$(racadm -u root -p $new_passwd -r $ip get Storage.PhysicalDisk |egrep -o '=.*#' | head -1 | sed 's/=//g' | sed 's/#//g')
+			disk2=$(racadm -u root -p $new_passwd -r $ip get Storage.PhysicalDisk |egrep -o '=.*#' | head -2 | tail -1 | sed 's/=//g' | sed 's/#//g')
+			[ -z "$disk2" ] && { echo "unable to identify disk(s) for $ip" ; echo "correct problem and retry" ; exit 1 ; }
+			racadm -u root -p $new_passwd -r $ip storage createvd:RAID.Integrated.1-1 -rl r1 -wp wt -rp nra -name "root" -pdkey:$disk1,$disk2
+			racadm -u root -p $new_passwd -r $ip jobqueue create RAID.Integrated.1-1
+			racadm -u root -p $new_passwd -r $ip serveraction powercycle
+		else
+			echo "VirtualDisk.1 already exists on $ip ; skipping"
+		fi
+		;;
+	 R640|R6415|FC640 |R630|R620|R420)
+		racadm -u root -p $new_passwd -r $ip get Storage.VirtualDisk.1 2>&1 >/dev/null
+		if [ $? -ne 0 ] ; then
+			echo "VirtualDisk.1 does not exist on $ip ; creating..."
+			disk1=$(racadm -u root -p $new_passwd -r $ip get Storage.PhysicalDisk |egrep -o '=.*#' | head -1 | sed 's/=//g' | sed 's/#//g')
+			disk2=$(racadm -u root -p $new_passwd -r $ip get Storage.PhysicalDisk |egrep -o '=.*#' | head -2 | tail -1 | sed 's/=//g' | sed 's/#//g')
+			[ -z "$disk2" ] && { echo "unable to identify disk(s) for $ip" ; echo "correct problem and retry" ; exit 1 ; }
+			racadm -u root -p $new_passwd -r $ip storage createvd:RAID.Integrated.1-1 -rl r1 -wp wt -rp nra -name "root" -pdkey:$disk1,$disk2
+			racadm -u root -p $new_passwd -r $ip jobqueue create RAID.Integrated.1-1 -r pwrcycle -s next reboot
+			racadm -u root -p $new_passwd -r $ip serveraction powercycle
+		else
+			echo "VirtualDisk.1 already exists on $ip ; skipping"
+		fi
+		;;
+	esac
+done
+
+# -rl == raid level
+# -wp == write policy
+# -rp == read policy
